@@ -1,0 +1,99 @@
+# Main-grid (p0) protocol -- PREREGISTERED grid and gate criteria, frozen before looking at results
+# (a guard against confirmation bias). Read by cfgid.sweep.run_p0 and cfgid.sweep.analyze; the
+# three-state gate (pass / fail / inconclusive) reads ONLY this file, and changing a threshold after
+# seeing results invalidates the gate. "p0" names this
+# preregistered main-grid protocol throughout the repository (outputs/p0, p0_table.json).
+
+# --- experimental grid (Section IV-A) ---
+grid:
+  decoders: [sdxl, sd15, sd21] # gate decoders: the 3 true-CFG decoders with DISTINCT VAEs and
+  # calibrated PSF sigma_core (sdxl~3.4 < sd21~6.5 < sd15~10.2 px) -> a cross-decoder sigma axis
+  # that does NOT destroy rho (the intrinsic VAE PSF differs at generation time). sd21 is
+  # v-prediction (sd_vpred_ddim backend). pixart_sigma and hunyuandit are run on the same grid with
+  # `run_p0 --decoder ...` but are not gate decoders (cfgid.sweep.analyze drops them with a notice).
+  w: [1, 2, 3, 5, 7, 10, 14, 20] # guidance strengths; w=1 is H0. The grid extends to w=20 so that
+  # knees at a large analytic w* (high sigma_blur) are not right-censored by the w-grid ceiling
+  # (analyze excludes cells with w* > max(w) as censored). Extending w changes a grid/sample
+  # dimension only, NOT a decision threshold.
+  qf: [none] # JPEG quality; "none" = uncompressed (a preliminary QF sweep showed the knee does NOT
+  # respond to QF). JPEG recompression is evaluated separately via configs/robustness.yaml.
+  sigma_blur: [0, 8, 16, 32] # CONTROLLED sigma-sweep (post-decode Gaussian PSF widths, decoded px):
+  # the knob that spreads w* across cells (cross-decoder sigma alone leaves w*~1, all decoders
+  # easily detectable). Combined with the cross-decoder sigma_core offset, each
+  # (decoder, sigma_blur) cell gets a distinct sigma_eff = sqrt(sigma_core^2 + sigma_blur^2).
+  # prompts_per_cell is the config default. The paper's main grid overrides it per decoder on the
+  # command line (run_p0 --prompts-per-cell): 512 prompts for SD1.5/SDXL and 256 for SD2.1,
+  # PixArt-Sigma and HunyuanDiT, with --sigma-blur 0,8,16,32 (see
+  # README.md). This file is not edited for those runs.
+  prompts_per_cell: 128 # distinct prompts per (decoder, sigma_blur) cell (default; see above).
+  seeds_per_prompt: 1
+  gen_scheduler: ddim # generation sampler (threat-model scope; run_p0 supports ddim only)
+  resolution: 512 # generation/inversion image side, PREREGISTERED (all decoders share the grid;
+  # SDXL runs off-native at 512 by design so the w x sigma_blur comparison is resolution-matched)
+  # NOTE: the gate: block below (decision thresholds) is unchanged from the original
+  # preregistration; only the swept degradation DIMENSION (QF -> sigma_blur) and the sample size
+  # changed, so the decision criteria are frozen.
+
+# --- latent patching (rho / E_tex live on the latent patch grid; Section III-B) ---
+patch:
+  patch_size: 4 # latent pixels per patch side; a 16x16 latent -> (4,4) = 16 patches, and the
+  # 64x64 latent of a 512^2 image -> the 16x16 patch grid used throughout
+  inversion_steps: 50 # DDIM-inverse steps T (Eq. (1)); --smoke uses 1
+  capture_step_frac: 0.5 # which inversion step's residual to reduce to rho (0..1); 0.5 T = 25
+
+# --- rho estimator (channel/rho.py; Section III-C, Eqs. (2)-(4)) ---
+rho:
+  log_ratio: true # rho = log(||r_cond|| / max(||r_uncond||, floor))
+  denom_floor: 1.0e-3 # denominator floor (prevents div-by-zero / heavy tails)
+  low_etex_mask_quantile: 0.2 # mask patches below this within-image E_tex quantile
+  winsor_quantiles: [0.01, 0.99] # winsorize rho across patches before aggregation
+
+# --- E_tex estimator (channel/e_tex.py) ---
+e_tex:
+  method: srm_highpass # local high-frequency energy; one method pinned
+
+# --- delta-deniability threshold (bounds/wstar_p0.py; Section III-E, Eq. (15)) ---
+# The Monte-Carlo TV check (python -m cfgid.bounds.montecarlo; Appendix B) crosses grid.w with
+# n_eff_grid in the scalar and the full-covariance form, montecarlo_samples draws per point.
+bounds:
+  delta: 0.05 # finite-sample deniability tolerance (TV <= delta)
+  n_eff_grid: [1, 16, 64, 256] # effective-sample-size sweep for w*
+  montecarlo_samples: 200000 # analytic-vs-simulated TV check
+  montecarlo_tol: 0.02 # |analytic TV - simulated TV| tolerance
+
+# --- parameter provenance (per parameter, NOT one global flag) ---
+provenance:
+  v: analytic_no_calibration # JPEG/DQT + quantization noise model
+  g_sigma: unlabeled_null_adapted # predictive track (NO H1 labels); pass only on this track
+
+# --- leakage-proof split (grouped by prompt so the same prompt never spans splits) ---
+# train / null_adapt / calibration / test = FIT / NULL / CAL / TEST in the paper (Section IV-A).
+split:
+  group_key: prompt_id
+  fractions: { train: 0.40, null_adapt: 0.20, calibration: 0.20, test: 0.20 }
+  seed: 0
+
+# --- evidence wiring (negative controls / sufficiency / sigma calibration) ---
+# Added BEFORE any full-grid run; the frozen gate thresholds below are untouched.
+evidence:
+  clip_baseline_enabled: true # CLIP-text-alignment nuisance (needs checkpoints/clip-vit-b32)
+  clip_local_dir: clip-vit-b32 # under the checkpoints root; missing -> baseline reported N/A
+  wrong_prompt_subset_qf: none # qf tier used for the wrong-prompt null (subset, cost control)
+  sigma_calib:
+    sources: [impulse, checkerboard] # calibration inputs pushed through VAE decode
+    min_r2: 0.90 # PSF Gaussian fit quality below this -> "effective sigma" downgrade
+    max_rel_ci_width: 0.50 # (CI width / sigma_hat) above this -> downgrade
+    max_source_rel_gap: 0.25 # cross-source relative gap above this -> downgrade
+
+# --- PRE-REGISTERED gate thresholds (three-state decision; cfgid.align.gate) ---
+# The knee-vs-w* alignment verdict is reported in Section IV-E7; the negative-control comparison
+# is Table VIII rows 1-2 (Section IV-E1).
+gate:
+  predictive_only_pass: true # pass requires the predictive (unlabeled) track
+  min_knee_wstar_slope: 0.0 # knee-vs-w* regression slope must exceed this...
+  slope_ci_level: 0.95 # ...with a CI (this level) excluding 0
+  min_correlation: 0.30 # min |corr| of knee vs w* across cells
+  negative_control_margin: 0.0 # rho AUC must be >= best nuisance-baseline AUC - margin
+  rho_sufficiency_max_auc_gap: 0.05 # (full-residual AUC) - (rho AUC) must be <= this
+  sigma_two_decoder_same_direction: true # sigma probe must agree across sdxl & sd15
+  bootstrap_resamples: 1000 # paired block-bootstrap for slope CI

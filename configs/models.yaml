@@ -1,0 +1,211 @@
+# Frozen-backbone snapshot contract (Table XV, Appendix B). Pinning model id / revision / dtype /
+# scheduler / branch_mode guards against HF auto-downloads or diffusers default changes silently
+# polluting sigma / g_sigma / the feature distribution. `cfgid doctor` validates presence
+# against `expected_files`. Download sources and local paths: README.md. Code loads weights from
+# `local_dir` only; `revision` is recorded, not passed to the loaders.
+#
+# The paper uses sd15, sd21, sdxl, pixart_sigma and hunyuandit. flux1-dev (guidance-distilled,
+# outside the DDIM-invertible family) and playground25 (blocked, see its notes) are not used.
+#
+# local_dir is relative to the checkpoints root (configs/paths.yaml roots.checkpoints,
+# default ./checkpoints). branch_mode: true_cfg_core (homogeneous SD rho) |
+# flux_specific_appendix (guidance-distilled, NOT homogeneous). backend: inversion family.
+
+models:
+  sd15:
+    hf_repo_id: stable-diffusion-v1-5/stable-diffusion-v1-5
+    revision: main
+    local_dir: sd15
+    dtype: float16
+    variant: fp16
+    scheduler: DDIMScheduler
+    branch_mode: true_cfg_core
+    backend: sd_ddim
+    license: CreativeML-OpenRAIL-M
+    gated: false
+    vae_channels: 4
+    text_encoders: [clip_l]
+    expected_files:
+      - model_index.json
+      - unet/config.json
+      - vae/config.json
+      - text_encoder/config.json
+    notes: >-
+      Core true-CFG decoder (distinct-VAE slice; gate sigma probe). The original runwayml repo was
+      removed; this is the maintained community mirror.
+
+  sdxl:
+    hf_repo_id: stabilityai/stable-diffusion-xl-base-1.0
+    revision: main
+    local_dir: sdxl
+    dtype: float16
+    variant: fp16
+    scheduler: DDIMScheduler
+    branch_mode: true_cfg_core
+    backend: sdxl_ddim
+    license: CreativeML-OpenRAIL-M
+    gated: false
+    vae_channels: 4
+    text_encoders: [clip_l, clip_bigg]
+    expected_files:
+      - model_index.json
+      - unet/config.json
+      - vae/config.json
+      - text_encoder/config.json
+      - text_encoder_2/config.json
+    notes: >-
+      Main-grid backbone and default single-step smoke target.
+
+  flux1-dev:
+    hf_repo_id: black-forest-labs/FLUX.1-dev
+    revision: main
+    local_dir: flux1-dev
+    dtype: bfloat16
+    variant: null
+    scheduler: FlowMatchEulerDiscreteScheduler
+    branch_mode: flux_specific_appendix
+    backend: flux_flow
+    license: FLUX.1-dev-Non-Commercial-License
+    gated: true
+    vae_channels: 16
+    text_encoders: [clip_l, t5xxl]
+    expected_files:
+      - model_index.json
+      - transformer/config.json
+      - vae/config.json
+      - text_encoder/config.json
+      - text_encoder_2/config.json
+    notes: >-
+      Not used in the paper (excluded in Appendix B). Guidance-distilled, so rho is NOT
+      homogeneous with SD; route via flux_specific_appendix with true_cfg_scale>1 + negative
+      prompt for the second branch. Gated (non-commercial): needs HF_TOKEN + accepted license.
+      DDIM inversion does NOT apply (flow-matching -> RF-inversion).
+
+  sd21:
+    hf_repo_id: stabilityai/stable-diffusion-2-1
+    revision: main
+    local_dir: sd21
+    dtype: float16
+    variant: null                     # modelscope mirror ships fp32 only (no *.fp16.* variant);
+                                      # load the default weights, dtype=float16 casts on .to(device)
+    scheduler: DDIMScheduler          # converted from_config; keeps prediction_type=v_prediction
+    branch_mode: true_cfg_core
+    backend: sd_vpred_ddim            # v-pred DDIM inversion (UNet v -> epsilon for rho homogeneity)
+    license: CreativeML-OpenRAIL-M
+    gated: false
+    vae_channels: 4
+    text_encoders: [clip_h]           # single OpenCLIP ViT-H/14 text encoder
+    expected_files:
+      - model_index.json
+      - unet/config.json
+      - vae/config.json
+      - text_encoder/config.json
+    notes: >-
+      Sigma-diversity core decoder: v-prediction SD (epsilon<->v converted in DDIM
+      inversion), 4-ch SD-VAE at 768 native -> a distinct effective sigma point vs sd15/sdxl.
+
+  playground25:
+    hf_repo_id: playgroundai/playground-v2.5-1024px-aesthetic
+    revision: main
+    local_dir: playground25
+    dtype: float16
+    variant: fp16
+    # PROVISIONAL/blocked: actual EDM scheduler; DDIM inversion must be verified before enabling.
+    scheduler: EDMDPMSolverMultistepScheduler
+    branch_mode: true_cfg_core
+    backend: sdxl_ddim                # PROVISIONAL backend reuse (SDXL arch); switch if not epsilon
+    license: Playground-v2.5-Community
+    gated: false
+    vae_channels: 4
+    text_encoders: [clip_l, clip_bigg]
+    expected_files:
+      - model_index.json
+      - unet/config.json
+      - vae/config.json
+      - text_encoder/config.json
+      - text_encoder_2/config.json
+    notes: >-
+      Sigma-diversity candidate: SDXL-arch + custom EDM-VAE (different VAE family) -> most
+      likely a well-separated sigma point. backend/scheduler are PROVISIONAL and intentionally
+      blocked by the SD DDIM loader until post-download DDIM conversion + pred-type verification pass.
+
+  pixart_sigma:
+    hf_repo_id: PixArt-alpha/PixArt-Sigma-XL-2-512-MS
+    revision: main
+    local_dir: pixart_sigma
+    dtype: float16
+    # PixArt-Sigma ships a DPM-Solver scheduler; the pixart_ddim backend swaps it to DDIMScheduler
+    # via from_config (epsilon-pred -> DDIM-invertible) and validates prediction_type=='epsilon'.
+    scheduler: DDIMScheduler
+    branch_mode: true_cfg_core
+    backend: pixart_ddim
+    license: openrail++
+    gated: false
+    vae_channels: 4
+    text_encoders: [t5_xxl]
+    expected_files:
+      - model_index.json
+      - scheduler/scheduler_config.json
+      - transformer/config.json
+      - transformer/diffusion_pytorch_model.safetensors
+      - vae/config.json
+      - vae/diffusion_pytorch_model.safetensors
+      - text_encoder/config.json
+      - text_encoder/model.safetensors.index.json
+      - text_encoder/model-00001-of-00002.safetensors
+      - text_encoder/model-00002-of-00002.safetensors
+      - tokenizer/tokenizer_config.json
+      - tokenizer/special_tokens_map.json
+      - tokenizer/spiece.model
+    notes: >-
+      Breadth decoder (architecture-shift point): assembled local PixArt-Sigma 512-MS snapshot:
+      base T5/VAE/scheduler components from PixArt-alpha/pixart_sigma_sdxlvae_T5_diffusers plus the
+      PixArt-alpha/PixArt-Sigma-XL-2-512-MS transformer overlay. DiT (transformer) + T5-XXL + 4-ch
+      SD-VAE, epsilon(+learned-sigma) pred -> DDIM-invertible and rho-homogeneous, yet a genuinely
+      DIFFERENT architecture (transformer vs UNet, T5 vs CLIP). The base scaffold may keep
+      model_index._class_name=PixArtAlphaPipeline; pixart_ddim loads it explicitly as
+      PixArtSigmaPipeline and validates transformer sample_size=64/out_channels=8 before real work.
+      Run `run_p0 --decoder pixart_sigma --smoke` after assembly to verify real weights before full run.
+
+  hunyuandit:
+    hf_repo_id: Tencent-Hunyuan/HunyuanDiT-v1.2-Diffusers
+    revision: main
+    local_dir: hunyuandit
+    dtype: float16
+    # Hunyuan-DiT ships a DDPMScheduler (v_prediction); the hunyuan_dit_ddim backend swaps it to
+    # DDIMScheduler via from_config (keeps v_prediction -> DDIM-invertible) and asserts
+    # prediction_type=='v_prediction'. The captured rho residual is mapped v->epsilon (homogeneous).
+    scheduler: DDIMScheduler
+    branch_mode: true_cfg_core
+    backend: hunyuan_dit_ddim
+    license: tencent-hunyuan-community  # Tencent Hunyuan Community License (HF license tag: 'other')
+    gated: false
+    vae_channels: 4
+    text_encoders: [clip_bilingual, mt5]
+    expected_files:
+      - model_index.json
+      - scheduler/scheduler_config.json
+      - transformer/config.json
+      - transformer/diffusion_pytorch_model.safetensors
+      - vae/config.json
+      - vae/diffusion_pytorch_model.safetensors
+      - text_encoder/config.json
+      - text_encoder/model.safetensors
+      - text_encoder_2/config.json
+      - text_encoder_2/model-00001-of-00002.safetensors
+      - text_encoder_2/model-00002-of-00002.safetensors
+      - tokenizer/tokenizer_config.json
+      - tokenizer/special_tokens_map.json
+      - tokenizer/vocab.txt
+      - tokenizer_2/tokenizer_config.json
+      - tokenizer_2/special_tokens_map.json
+      - tokenizer_2/spiece.model
+    notes: >-
+      Breadth decoder (second DiT lineage): Hunyuan-DiT v1.2 (Tencent). DiT transformer + bilingual
+      CLIP + mT5 + 4-ch SD-VAE, v-prediction -> DDIM-invertible; the captured rho residual is mapped
+      v->epsilon (eps = sqrt(a_t) v + sqrt(1-a_t) z) so rho stays homogeneous with the SD/PixArt
+      epsilon channel. A genuinely DIFFERENT DiT lineage from PixArt (rotary pos-emb, dual text
+      encoders, resolution/style micro-conditioning) -> the SECOND non-SD core architecture.
+      ModelScope mirror: Xorbits/HunyuanDiT-v1.2-Diffusers (NON-distilled; the distilled variant may
+      be guidance-distilled and break true CFG). Run `run_p0 --decoder hunyuandit --smoke` after
+      download to verify real weights before the full run.

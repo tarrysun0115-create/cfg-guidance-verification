@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Main-grid (p0) driver: generate -> post-decode degradation -> dual-branch invert -> feature store.
+#
+# Thin wrapper around `python -m cfgid.sweep.run_p0` for ONE decoder: pins the in-repo caches
+# (scripts/_env_paths.sh), tees the output to logs/run_p0.log and ends it with a [done] or
+# [stall] line. "p0" names the preregistered main-grid protocol of configs/p0.yaml.
+# Produces: the per-image main-grid tables behind every main-grid result (Section IV-A; protocol
+#   in Appendix B).
+# Inputs: frozen decoder weights (configs/models.yaml) and a GPU for real runs (CPU/MPS work for
+#   --smoke). Weight-gated: without the decoder's weights it prints a [skip] notice and exits 0.
+# Outputs: outputs/p0/<decoder>/p0_table.json plus the compact/residual feature store
+#   (outputs/p0_smoke/ with --smoke; --out overrides; --lean writes p0_table.json only).
+# Usage:
+#   scripts/run_p0 --decoder sdxl --smoke
+#   scripts/run_p0 --decoder sdxl --prompts-per-cell 512 --sigma-blur 0,8,16,32
+# The paper's main grid ran one job per decoder with these flags (README.md).
+set -euo pipefail
+_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$_HERE/_env_paths.sh"
+_LOG_DIR="$CFGID_REPO_ROOT/logs"
+mkdir -p "$_LOG_DIR"
+_LOG="$_LOG_DIR/run_p0.log"
+set +e
+uv run --no-sync python -m cfgid.sweep.run_p0 "$@" 2>&1 | tee "$_LOG"
+_status="${PIPESTATUS[0]}"
+set -e
+if [ "$_status" -eq 0 ]; then
+  echo "[done] run_p0" | tee -a "$_LOG"
+else
+  echo "[stall] run_p0 exit=$_status" | tee -a "$_LOG"
+fi
+exit "$_status"

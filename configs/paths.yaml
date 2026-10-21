@@ -1,0 +1,10 @@
+# Path contract: the ONLY file to edit to relocate the data roots on another machine (no Python
+# changes needed). Read by cfgid.paths; `cfgid doctor` checks the resolved roots.
+# Values are relative to the repo root unless absolute. Precedence per root:
+#   env CFGID_<NAME>_DIR  >  this file  >  in-repo default.
+# Keys must match cfgid.paths._ROOTS.
+roots:
+  checkpoints: checkpoints
+  data: data
+  cache: .cache
+  outputs: outputs

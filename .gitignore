@@ -1,0 +1,21 @@
+# Environments and caches (scripts/_env_paths.sh keeps all runtime caches under .cache/)
+.venv/
+__pycache__/
+*.pyc
+.cache/
+.pytest_cache/
+*.egg-info/
+
+# Model weights, downloaded data and job logs (not distributed)
+checkpoints/
+data/
+logs/
+
+# Local secrets (e.g. .env.local with HF_TOKEN)
+.env*
+
+.DS_Store
+
+# Run outputs (written by the scripts; not distributed)
+outputs/
+figures/

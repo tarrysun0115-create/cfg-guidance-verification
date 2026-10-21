@@ -1,0 +1,83 @@
+[project]
+name = "cfgid"
+version = "0.0.0"
+description = "Verification of classifier-free guidance strength in diffusion-generated images (code for peer review)"
+readme = "README.md"
+requires-python = "==3.12.*"
+license = { file = "LICENSE" }
+authors = [{ name = "Anonymous" }]
+
+# Core (numpy/scipy theory side) + ml (frozen-backbone inference & inversion).
+# Kept together because device.py / backends import torch and are part of the
+# default contract surface. Heavy diffusers/transformers imports are lazy
+# (inside functions) so modules import fine even before weights/network exist.
+dependencies = [
+    # numpy capped to torch-2.6-era 2.x; transformers capped below the breaking 5.x line.
+    "numpy>=1.26,<2.3",
+    "scipy>=1.13",
+    "omegaconf>=2.3",
+    "pyyaml>=6.0",
+    "pillow>=10.0",
+    # Pin a single torch minor that BOTH channels publish for cp312 (cu124 ceiling == PyPI/MPS),
+    # so linux (2.6.0+cu124) and macOS (2.6.0) run identical numerics — the cross-platform contract.
+    "torch==2.6.*",
+    "torchvision==0.21.*",
+    "diffusers>=0.32",
+    "transformers>=4.44,<5",
+    "accelerate>=0.34",
+    "safetensors>=0.4",
+    "sentencepiece>=0.2",
+    "protobuf>=4.25",
+    "huggingface-hub>=0.25",
+    "matplotlib>=3.10.9",
+]
+
+[project.optional-dependencies]
+# Optional extra (not installed by default): lpips adds the AEROBLADE LPIPS-VGG distance in
+# scripts/analysis/retarget_baselines.py (L1/L2 only without it); piq is not imported by the
+# code in this repository.
+attack = ["lpips>=0.1.4", "piq>=0.8"]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.6", "pyright>=1.1.380"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cfgid"]
+
+# ---------------------------------------------------------------------------
+# uv platform dual-lock: a single lock does not guarantee the
+# right torch on both ends. macOS-arm64 takes the PyPI wheel (MPS-enabled);
+# linux-x86_64 takes the CUDA 12.4 build from the PyTorch index. `cfgid doctor`
+# asserts `torch.version.cuda is not None` on Linux.
+# ---------------------------------------------------------------------------
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu124", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cu124", marker = "sys_platform == 'linux'" }]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src"]
+cache-dir = ".cache/ruff"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+reportMissingTypeStubs = false
+# diffusers/transformers re-export via lazy __getattr__; pyright can't see those exports.
+reportPrivateImportUsage = false
+venvPath = "."
+venv = ".venv"

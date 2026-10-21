@@ -1,0 +1,93 @@
+# OFF-GATE post-processing ROBUSTNESS config. NOT the preregistered gate: this file is consumed
+# only by `run_p0 --config configs/robustness.yaml --lean` and the robustness analysis.
+# configs/p0.yaml (the frozen gate) is untouched. The grid below isolates a ONE-AT-A-TIME
+# degradation (jpeg / resize / crop) at qf=none, sigma_blur=0, so the only axis that varies is
+# `postproc`.
+#
+# Produces: the post-processing pool (SD1.5, SD2.1, SDXL; 128 prompts per decoder) behind
+# Table XII(a) (Section IV-E6); its analysis and job scripts are not part of this repository.
+# One job per decoder and prompt shard, e.g. `scripts/run_p0 --decoder sdxl --config configs/robustness.yaml --lean
+# --prompt-shard 0/2`. Prompts and seeds follow the same deterministic bank and seed rule as the
+# main grid (cfgid.sweep.run_p0).
+#
+# Cost knobs (edit freely): grid.w and grid.postproc set the inversion count. With w=[1,7,14,20]
+# (1 H0 + 3 H1) x 12 postproc x 128 prompts = ~6.1k inversions/decoder; sharded 2-ways for sbatch
+# (--prompt-shard k/2) that is ~3.1k per shard (~40 GPU-h on A100). Widen w for the full main-grid w
+# grid at higher cost.
+
+grid:
+  decoders: [sdxl, sd15, sd21] # the 3 gate decoders of configs/p0.yaml (distinct-VAE slice)
+  w: [1, 7, 14, 20] # H0 (w=1) + 3 high-guidance H1 (strong-signal regime where robustness matters);
+  # widen to the full main-grid [1,2,3,5,7,10,14,20] for a full-grid robustness run at ~2x cost.
+  qf: [none] # JPEG goes through the postproc axis below (one-at-a-time), so the qf axis stays none.
+  sigma_blur: [0] # isolate the post-processing op: no extra blur, so `postproc` is the only variation.
+  postproc: # ONE-AT-A-TIME degradations; `none` is the undegraded reference cell.
+    - { name: none, kind: none }
+    - { name: jpeg95, kind: jpeg, param: 95 }
+    - { name: jpeg90, kind: jpeg, param: 90 }
+    - { name: jpeg85, kind: jpeg, param: 85 }
+    - { name: jpeg75, kind: jpeg, param: 75 }
+    - { name: jpeg50, kind: jpeg, param: 50 }
+    - { name: resize0.75, kind: resize, param: 0.75 } # downscale to 0.75x then upscale back (full-res)
+    - { name: resize0.50, kind: resize, param: 0.50 }
+    - { name: resize0.25, kind: resize, param: 0.25 }
+    - { name: crop0.875, kind: crop, param: 0.875 } # center-crop to 0.875 of each side then zoom back
+    - { name: crop0.75, kind: crop, param: 0.75 }
+    - { name: crop0.50, kind: crop, param: 0.50 }
+  prompts_per_cell: 128 # 128 prompts per decoder (the configs/p0.yaml default count)
+  seeds_per_prompt: 1
+  gen_scheduler: ddim
+  resolution: 512
+
+# --- everything below is copied verbatim from configs/p0.yaml so the typed loader is satisfied; ---
+# --- it is NOT a gate here (the robustness analysis never reads the gate: block). ---
+patch:
+  patch_size: 4
+  inversion_steps: 50
+  capture_step_frac: 0.5
+
+rho:
+  log_ratio: true
+  denom_floor: 1.0e-3
+  low_etex_mask_quantile: 0.2
+  winsor_quantiles: [0.01, 0.99]
+
+e_tex:
+  method: srm_highpass
+
+bounds:
+  delta: 0.05
+  n_eff_grid: [1, 16, 64, 256]
+  montecarlo_samples: 200000
+  montecarlo_tol: 0.02
+
+provenance:
+  v: analytic_no_calibration
+  g_sigma: unlabeled_null_adapted
+
+split:
+  group_key: prompt_id
+  fractions: { train: 0.40, null_adapt: 0.20, calibration: 0.20, test: 0.20 }
+  seed: 0
+
+evidence:
+  clip_baseline_enabled: true
+  clip_local_dir: clip-vit-b32
+  wrong_prompt_subset_qf: 50 # a qf NOT in grid.qf -> the wrong-prompt null is DISABLED for this run
+  # (the wrong-prompt re-inversion is a main-grid diagnostic, not needed for the robustness sweep).
+  sigma_calib:
+    sources: [impulse, checkerboard]
+    min_r2: 0.90
+    max_rel_ci_width: 0.50
+    max_source_rel_gap: 0.25
+
+# Unused by the robustness analysis; present only so load_p0_config() accepts the file.
+gate:
+  predictive_only_pass: true
+  min_knee_wstar_slope: 0.0
+  slope_ci_level: 0.95
+  min_correlation: 0.30
+  negative_control_margin: 0.0
+  rho_sufficiency_max_auc_gap: 0.05
+  sigma_two_decoder_same_direction: true
+  bootstrap_resamples: 1000
