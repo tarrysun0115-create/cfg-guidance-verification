@@ -2,7 +2,8 @@
 
 This repository holds the core code behind the manuscript under review: the detection library
 and the scripts that produce the main comparisons. Section, table, figure and equation numbers
-refer to the submitted PDF. Result files, the test suite, figure scripts and auxiliary diagnostic
+refer to the submitted PDF and its supplementary material (numbers prefixed with S). In module docstrings,
+Appendix B/C, Table XV and Lemma C.2 correspond to supplementary Sections S2/S3, Table S2 and Lemma S2. Result files, the test suite, figure scripts and auxiliary diagnostic
 scripts are not included; module docstrings occasionally mention such auxiliary scripts by name.
 
 ## Overview
@@ -63,7 +64,7 @@ device is chosen automatically (CUDA > MPS > CPU, `src/cfgid/device.py`). Data r
 
 ## Models
 
-The five decoders (Table XV), from `configs/models.yaml` (fp16, DDIM scheduler). Weights are
+The five decoders (Table S2 of the supplementary material), from `configs/models.yaml` (fp16, DDIM scheduler). Weights are
 loaded only from `checkpoints/<key>/`; nothing is downloaded automatically.
 
 | Key | Hugging Face repo | Backend |
@@ -96,7 +97,7 @@ Table IV uses the released TorchScript checkpoint of its authors
 Run every command from the repository root after `source scripts/_env_paths.sh`. The GPU stages
 of the paper ran on NVIDIA A100 GPUs, one job per decoder (and per prompt shard where noted).
 
-### 1. Main grid: generation and inversion [GPU] (Section IV-A, Appendix B)
+### 1. Main grid: generation and inversion [GPU] (Section IV-A, supplementary Section S2)
 
 `cfgid.sweep.run_p0` generates the H0 (w=1) and H1 (w in {2,3,5,7,10,14,20}) images of every
 prompt (shared seed per prompt), stores each as an 8-bit PNG after the post-decode blur
@@ -122,7 +123,7 @@ for d in sd15 sd21 sdxl pixart_sigma; do uv run --no-sync python -m cfgid.channe
 uv run --no-sync python -m cfgid.sweep.analyze          # Table VIII rows 1-2, w*/knee verdict
 uv run --no-sync python -m cfgid.sweep.pooled_neff_scaling
 uv run --no-sync python scripts/analysis/master_table.py
-uv run --no-sync python -m cfgid.bounds.montecarlo      # Monte-Carlo TV check (Section III-E, Appendix B)
+uv run --no-sync python -m cfgid.bounds.montecarlo      # Monte-Carlo TV check (Section III-E, supplementary Section S2)
 ```
 
 ### 3. Main comparisons (CPU, on the main-grid outputs)
@@ -200,7 +201,7 @@ uv run --no-sync python scripts/analysis/unified_baselines.py
 Seeds are fixed in code and command-line defaults (split seed 0, generation seed per prompt,
 fresh-batch seeds `seed base + prompt index`, and per-analysis seeds for every permutation,
 bootstrap and Monte-Carlo draw). Cross-cell AUC_K values and partition-averaged same-cell values
-are Monte-Carlo estimates (Section IV-A, Appendix B); a different number of draws, or a different
+are Monte-Carlo estimates (Section IV-A, supplementary Section S2); a different number of draws, or a different
 order of contrasts sharing one generator, gives a different estimate in the third decimal. GPU
 generation and inversion can differ in low-order digits across GPU models and library versions;
 the analyses consume the stored per-image values.
